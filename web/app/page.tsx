@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useLocalWebRTC } from "./use-local-webrtc";
 
 type View = "home" | "meeting" | "report";
 type Panel = "members" | "chat" | "activities" | null;
@@ -92,9 +93,6 @@ export default function Home() {
   const [panel, setPanel] = useState<Panel>(null);
   const [modal, setModal] = useState<"create" | "join" | null>(null);
   const [meetingMode, setMeetingMode] = useState<"class" | "normal">("class");
-  const [micOn, setMicOn] = useState(true);
-  const [cameraOn, setCameraOn] = useState(true);
-  const [sharing, setSharing] = useState(false);
   const [recording, setRecording] = useState(false);
   const [layout, setLayout] = useState<"grid" | "focus">("grid");
   const [activity, setActivity] = useState("checkin");
@@ -103,6 +101,7 @@ export default function Home() {
   const [localMessages, setLocalMessages] = useState(baseMessages);
   const [toast, setToast] = useState("");
   const [elapsed, setElapsed] = useState(28 * 60 + 16);
+  const call = useLocalWebRTC();
 
   useEffect(() => {
     if (view !== "meeting") return;
@@ -180,7 +179,7 @@ export default function Home() {
             </div>
           </div>
           <div className="meeting-meta">
-            <span>会议号 821 406 233</span>
+            <span>会议号 {call.roomId.replace(/(\d{3})(?=\d)/g, "$1 ")}</span>
             <button onClick={() => setToast("会议号已复制")}>复制</button>
           </div>
           <div className="meeting-head-actions">
@@ -200,43 +199,7 @@ export default function Home() {
           </div>
         </header>
         <section className={`meeting-stage ${panel ? "with-panel" : ""}`}>
-          <div className={`video-grid ${layout}`}>
-            {participants.map((person, index) => (
-              <article
-                className={`video-tile tile-${index + 1} ${!person.camera ? "camera-off" : ""}`}
-                key={person.name}
-              >
-                <div
-                  className="video-gradient"
-                  style={
-                    { "--tile-color": person.color } as React.CSSProperties
-                  }
-                >
-                  {person.camera ? (
-                    <>
-                      <span className="person-silhouette" />
-                      <PersonAvatar name={person.name} color={person.color} />
-                    </>
-                  ) : (
-                    <div className="camera-off-state">
-                      <PersonAvatar name={person.name} color={person.color} />
-                      <span>摄像头已关闭</span>
-                    </div>
-                  )}
-                </div>
-                <div className="tile-label">
-                  <span>
-                    {person.name}
-                    {person.role === "主持人" ? " · 主持人" : ""}
-                  </span>
-                  <span>{person.mic ? "◖))" : "╳"}</span>
-                </div>
-                {index === 3 && (
-                  <span className="speaking-badge">正在发言</span>
-                )}
-              </article>
-            ))}
-          </div>
+          <RealVideoGrid call={call} layout={layout} />
           {panel && (
             <MeetingPanel
               panel={panel}
@@ -256,30 +219,30 @@ export default function Home() {
         <footer className="meeting-controls">
           <div className="control-group">
             <button
-              className={micOn ? "" : "off"}
-              onClick={() => setMicOn(!micOn)}
+              className={call.micOn ? "" : "off"}
+              onClick={call.toggleMic}
+              disabled={!call.localStream}
             >
-              <span>{micOn ? "◖))" : "╳"}</span>
-              <small>{micOn ? "静音" : "解除静音"}</small>
+              <span>{call.micOn ? "◖))" : "╳"}</span>
+              <small>{call.micOn ? "静音" : "解除静音"}</small>
             </button>
             <button
-              className={cameraOn ? "" : "off"}
-              onClick={() => setCameraOn(!cameraOn)}
+              className={call.cameraOn ? "" : "off"}
+              onClick={call.toggleCamera}
+              disabled={!call.localStream}
             >
-              <span>{cameraOn ? "▰" : "▱"}</span>
-              <small>{cameraOn ? "关闭视频" : "开启视频"}</small>
+              <span>{call.cameraOn ? "▰" : "▱"}</span>
+              <small>{call.cameraOn ? "关闭视频" : "开启视频"}</small>
             </button>
           </div>
           <div className="control-group central">
             <button
-              className={sharing ? "active-control" : ""}
-              onClick={() => {
-                setSharing(!sharing);
-                setToast(sharing ? "已停止共享" : "正在共享屏幕");
-              }}
+              className={call.sharing ? "active-control" : ""}
+              onClick={() => void call.toggleSharing()}
+              disabled={!call.localStream}
             >
               <span>▣</span>
-              <small>{sharing ? "停止共享" : "共享屏幕"}</small>
+              <small>{call.sharing ? "停止共享" : "共享屏幕"}</small>
             </button>
             <button
               className={recording ? "recording" : ""}
@@ -314,7 +277,13 @@ export default function Home() {
               <small>课堂互动</small>
             </button>
           </div>
-          <button className="end-button" onClick={() => setView("report")}>
+          <button
+            className="end-button"
+            onClick={() => {
+              call.leave();
+              setView("report");
+            }}
+          >
             结束课堂
           </button>
         </footer>
@@ -411,6 +380,148 @@ export default function Home() {
         </div>
       )}
     </main>
+  );
+}
+
+function RealVideoGrid({
+  call,
+  layout,
+}: {
+  call: ReturnType<typeof useLocalWebRTC>;
+  layout: "grid" | "focus";
+}) {
+  const cameras = call.devices.filter((device) => device.kind === "videoinput");
+  const microphones = call.devices.filter(
+    (device) => device.kind === "audioinput",
+  );
+  const statusCopy = {
+    idle: "准备加入",
+    starting: "正在请求设备权限",
+    waiting: "等待另一位参会者",
+    connecting: "正在建立加密连接",
+    connected: "点对点连接已建立",
+    error: "连接需要处理",
+  }[call.status];
+
+  return (
+    <div className={`video-grid real-call-grid ${layout}`}>
+      <article className="video-tile real-video-tile local-video-tile">
+        <video
+          ref={call.localVideoRef}
+          autoPlay
+          playsInline
+          muted
+          className={!call.cameraOn ? "video-hidden" : ""}
+        />
+        {!call.localStream && (
+          <div className="real-video-placeholder">
+            <PersonAvatar name="林老师" color="#c6f1e2" />
+            <span>摄像头尚未开启</span>
+          </div>
+        )}
+        {call.localStream && !call.cameraOn && (
+          <div className="real-video-placeholder">
+            <PersonAvatar name="林老师" color="#c6f1e2" />
+            <span>摄像头已关闭</span>
+          </div>
+        )}
+        <div className="tile-label">
+          <span>林老师 · 我</span>
+          <span>{call.micOn ? "◖))" : "╳"}</span>
+        </div>
+        {call.sharing && <span className="speaking-badge">正在共享</span>}
+      </article>
+
+      <article className="video-tile real-video-tile remote-video-tile">
+        <video ref={call.remoteVideoRef} autoPlay playsInline />
+        {!call.remoteStream && (
+          <div className="remote-waiting">
+            <div className="waiting-rings">
+              <i />
+              <i />
+              <span>＋</span>
+            </div>
+            <strong>
+              {call.status === "waiting" ? "等待对方加入" : "第二位参会者"}
+            </strong>
+            <small>在另一个浏览器窗口打开本地地址，输入相同房间号</small>
+          </div>
+        )}
+        {call.remoteStream && (
+          <div className="tile-label">
+            <span>远端参会者</span>
+            <span>◖))</span>
+          </div>
+        )}
+      </article>
+
+      <div className={`connection-status ${call.status}`}>
+        <i />
+        <span>{statusCopy}</span>
+      </div>
+
+      {call.localStream && (
+        <div className="device-switcher">
+          <label>
+            <span>摄像头</span>
+            <select
+              value={call.cameraId}
+              onChange={(event) => void call.switchCamera(event.target.value)}
+            >
+              <option value="">系统默认</option>
+              {cameras.map((device, index) => (
+                <option value={device.deviceId} key={device.deviceId}>
+                  {device.label || `摄像头 ${index + 1}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>麦克风</span>
+            <select
+              value={call.microphoneId}
+              onChange={(event) =>
+                void call.switchMicrophone(event.target.value)
+              }
+            >
+              <option value="">系统默认</option>
+              {microphones.map((device, index) => (
+                <option value={device.deviceId} key={device.deviceId}>
+                  {device.label || `麦克风 ${index + 1}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button onClick={call.leave}>离开连接</button>
+        </div>
+      )}
+
+      {(call.status === "idle" || call.status === "error") && (
+        <section className="call-lobby" aria-label="本地真实会议实验">
+          <span className="call-lobby-kicker">本地 WebRTC 实验</span>
+          <h2>打开真实摄像头，开始双人会议</h2>
+          <p>
+            在两个本地浏览器窗口输入相同房间号，即可建立真实的点对点音视频连接。
+          </p>
+          <label className="room-code-field">
+            <span>房间号</span>
+            <input
+              value={call.roomId}
+              onChange={(event) => call.setRoomId(event.target.value)}
+              inputMode="numeric"
+              aria-label="本地会议房间号"
+            />
+          </label>
+          {call.error && <div className="call-error">{call.error}</div>}
+          <button className="join-real-call" onClick={() => void call.join()}>
+            开启设备并加入 <span>→</span>
+          </button>
+          <small>
+            浏览器会请求摄像头与麦克风权限；媒体只在两个本地窗口之间传输。
+          </small>
+        </section>
+      )}
+    </div>
   );
 }
 
