@@ -1,0 +1,17 @@
+# Agent 和编辑器的本地状态；长期上下文必须写入 docs/。
+.agent-local/
+.idea/
+.vscode/
+*.swp
+
+# 密钥与本地配置
+.env
+.env.*
+!.env.example
+
+# 常见生成目录
+coverage/
+dist/
+build/
+target/
+node_modules/
