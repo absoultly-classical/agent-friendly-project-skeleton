@@ -11,6 +11,7 @@ export class FakeMediaStreamTrack {
   readonly kind: TrackKind;
   readonly deviceId: string;
   enabled = true;
+  readyState: MediaStreamTrackState = "live";
   stopped = false;
   onended: ((event: Event) => unknown) | null = null;
 
@@ -22,6 +23,7 @@ export class FakeMediaStreamTrack {
 
   stop() {
     this.stopped = true;
+    this.readyState = "ended";
   }
 
   end() {
@@ -106,6 +108,37 @@ export const getDisplayMediaMock = vi.fn(async () =>
   ]) as unknown as MediaStream,
 );
 
+export class FakeMediaRecorder {
+  static instances: FakeMediaRecorder[] = [];
+  static isTypeSupported = vi.fn((type: string) => type === "video/webm");
+  readonly stream: MediaStream;
+  readonly mimeType = "video/webm";
+  state: RecordingState = "inactive";
+  ondataavailable: ((event: BlobEvent) => unknown) | null = null;
+  onerror: ((event: Event) => unknown) | null = null;
+  onstop: (() => unknown) | null = null;
+  start = vi.fn((timeslice?: number) => {
+    void timeslice;
+    this.state = "recording";
+  });
+  stop = vi.fn(() => {
+    if (this.state !== "recording") {
+      throw new DOMException("inactive", "InvalidStateError");
+    }
+    this.state = "inactive";
+    this.ondataavailable?.({ data: new Blob(["local-recording"]) } as BlobEvent);
+    this.onstop?.();
+  });
+  fail = vi.fn(() => {
+    this.onerror?.(new Event("error"));
+  });
+
+  constructor(stream: MediaStream) {
+    this.stream = stream;
+    FakeMediaRecorder.instances.push(this);
+  }
+}
+
 export const enumerateDevicesMock = vi.fn(async () =>
   [
     { deviceId: "camera-default", kind: "videoinput", label: "测试摄像头" },
@@ -117,7 +150,14 @@ export const enumerateDevicesMock = vi.fn(async () =>
   ] as MediaDeviceInfo[],
 );
 
-class FakeBroadcastChannel {
+const deviceChangeListeners = new Set<EventListener>();
+
+export function dispatchDeviceChange() {
+  const event = new Event("devicechange");
+  deviceChangeListeners.forEach((listener) => listener(event));
+}
+
+export class FakeBroadcastChannel {
   static rooms = new Map<string, Set<FakeBroadcastChannel>>();
 
   readonly name: string;
@@ -145,6 +185,17 @@ class FakeBroadcastChannel {
   }
 }
 
+export function getBroadcastChannels(name: string) {
+  return [...(FakeBroadcastChannel.rooms.get(name) ?? [])];
+}
+
+export function broadcastToRoom(name: string, data: unknown) {
+  const recipients = FakeBroadcastChannel.rooms.get(name) ?? new Set();
+  for (const recipient of recipients) {
+    queueMicrotask(() => recipient.onmessage?.({ data } as MessageEvent));
+  }
+}
+
 export class FakeRtpSender {
   track: FakeMediaStreamTrack | null;
 
@@ -167,6 +218,7 @@ export class FakePeerConnection {
   ontrack: ((event: RTCTrackEvent) => unknown) | null = null;
   onicecandidate: ((event: RTCPeerConnectionIceEvent) => unknown) | null = null;
   onconnectionstatechange: (() => unknown) | null = null;
+  readonly addedIceCandidates: RTCIceCandidateInit[] = [];
   private senders: FakeRtpSender[] = [];
 
   constructor() {
@@ -203,7 +255,12 @@ export class FakePeerConnection {
     if (description.type === "answer") this.scheduleConnected();
   }
 
-  async addIceCandidate() {}
+  async addIceCandidate(candidate: RTCIceCandidateInit) {
+    if (!this.remoteDescription) {
+      throw new Error("remote description is required before ICE candidate");
+    }
+    this.addedIceCandidates.push(candidate);
+  }
 
   close() {
     this.connectionState = "closed";
@@ -226,6 +283,12 @@ function installBrowserFakes() {
       getUserMedia: getUserMediaMock,
       getDisplayMedia: getDisplayMediaMock,
       enumerateDevices: enumerateDevicesMock,
+      addEventListener: (type: string, listener: EventListener) => {
+        if (type === "devicechange") deviceChangeListeners.add(listener);
+      },
+      removeEventListener: (type: string, listener: EventListener) => {
+        if (type === "devicechange") deviceChangeListeners.delete(listener);
+      },
     },
   });
   Object.defineProperty(globalThis, "MediaStream", {
@@ -239,6 +302,10 @@ function installBrowserFakes() {
   Object.defineProperty(globalThis, "RTCPeerConnection", {
     configurable: true,
     value: FakePeerConnection,
+  });
+  Object.defineProperty(globalThis, "MediaRecorder", {
+    configurable: true,
+    value: FakeMediaRecorder,
   });
   Object.defineProperty(globalThis.crypto, "randomUUID", {
     configurable: true,
@@ -254,6 +321,8 @@ beforeEach(() => {
   peerSequence = 0;
   FakeBroadcastChannel.rooms.clear();
   FakePeerConnection.instances = [];
+  FakeMediaRecorder.instances = [];
+  deviceChangeListeners.clear();
   getUserMediaMock.mockReset();
   getUserMediaMock.mockImplementation(async (constraints) =>
     streamFor(constraints) as unknown as MediaStream,
