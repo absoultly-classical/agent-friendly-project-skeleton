@@ -1,0 +1,44 @@
+name: CI
+
+# 机械执行 AGENTS.md“提交与测试”约定：每次推送与合并请求都必须通过
+# lint、自动化测试、TypeScript 类型检查和生产构建。
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: web lint + check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 准备 Node 环境
+        uses: actions/setup-node@v4
+        with:
+          # 跟随 Node 22 主线，满足 web/package.json 的 engines >=22.13.0。
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 按 lockfile 安装依赖
+        run: npm ci
+
+      - name: 代码规范检查
+        run: npm run lint
+
+      - name: 完整检查（测试 + 类型检查 + 生产构建）
+        run: npm run check

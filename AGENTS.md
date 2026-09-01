@@ -59,6 +59,11 @@
   注释或放宽断言来让结果变绿。
 - 交付给用户之前，确认最终状态下所有测试均通过，并把执行的命令与结果写入任务
   文档，作为可复核的验证证据。
+- 这两条纪律有机械门禁保证：`.github/workflows/ci.yml` 在每次 push 与 pull request
+  上执行 lint 与完整检查；`.githooks/pre-commit` 提供同样的本地提交门禁，需执行
+  `git config core.hooksPath .githooks` 启用一次。门禁细节见
+  [`docs/development.md`](docs/development.md) 的“门禁自动化”。不要用绕过门禁的方式
+  让提交通过。
 
 ## 信息冲突时的优先级
 
