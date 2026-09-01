@@ -11,6 +11,13 @@ import {
 import type { JoinOptions } from "./use-local-webrtc";
 import { useLocalRecording } from "./use-local-recording";
 import {
+  readStoredJson,
+  readStoredText,
+  removeStoredValue,
+  writeStoredJson,
+  writeStoredText,
+} from "./local-storage";
+import {
   pruneLocalMaterialContents,
   readLocalMaterialContents,
   removeLocalMaterialContent,
@@ -123,48 +130,34 @@ const maxStoredReportTodoIdLength = 80;
 const maxStoredReportTodoTextLength = 240;
 
 function readNotificationReadIds(): string[] {
-  if (typeof window === "undefined") return [];
-  let stored: string | null;
-  try {
-    stored = window.localStorage.getItem(notificationReadStorageKey);
-  } catch {
-    return [];
-  }
-  if (!stored || stored.length > maxNotificationReadStorageLength) return [];
-  try {
-    const parsed = JSON.parse(stored) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    const knownIds = new Set<string>(
-      notificationCatalog.map((notification) => notification.id),
-    );
-    return Array.from(
-      new Set(
-        parsed.filter(
-          (value): value is string =>
-            typeof value === "string" && knownIds.has(value),
-        ),
+  const parsed = readStoredJson(
+    notificationReadStorageKey,
+    maxNotificationReadStorageLength,
+  );
+  if (!Array.isArray(parsed)) return [];
+  const knownIds = new Set<string>(
+    notificationCatalog.map((notification) => notification.id),
+  );
+  return Array.from(
+    new Set(
+      parsed.filter(
+        (value): value is string =>
+          typeof value === "string" && knownIds.has(value),
       ),
-    );
-  } catch {
-    return [];
-  }
+    ),
+  );
 }
 
 function writeNotificationReadIds(ids: readonly string[]) {
-  if (typeof window === "undefined") return false;
   const knownIds = new Set<string>(
     notificationCatalog.map((notification) => notification.id),
   );
   const normalized = Array.from(new Set(ids)).filter((id) => knownIds.has(id));
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(normalized);
-    if (serialized.length > maxNotificationReadStorageLength) return false;
-    window.localStorage.setItem(notificationReadStorageKey, serialized);
-    return window.localStorage.getItem(notificationReadStorageKey) === serialized;
-  } catch {
-    return false;
-  }
+  return writeStoredJson(
+    notificationReadStorageKey,
+    normalized,
+    maxNotificationReadStorageLength,
+  );
 }
 
 function createNotifications(readIds: readonly string[]): AppNotification[] {
@@ -181,55 +174,47 @@ function reportTodoStorageKey(roomId: string) {
 
 function readLocalReportTodos(roomId: string | null): ReportTodo[] {
   const todos: ReportTodo[] = [];
-  if (!roomId || typeof window === "undefined") return todos;
-  let stored: string | null;
-  try {
-    stored = window.localStorage.getItem(reportTodoStorageKey(roomId));
-  } catch {
-    return todos;
-  }
-  if (!stored || stored.length > maxReportTodoStorageLength) return todos;
-  try {
-    const parsed = JSON.parse(stored) as unknown;
-    if (!Array.isArray(parsed)) return todos;
-    const seenIds = new Set<string>();
-    parsed.forEach((value) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return;
-      const todo = value as {
-        id?: unknown;
-        title?: unknown;
-        detail?: unknown;
-        done?: unknown;
-      };
-      if (
-        typeof todo.id === "string" &&
-        todo.id.trim().length > 0 &&
-        todo.id.length <= maxStoredReportTodoIdLength &&
-        typeof todo.title === "string" &&
-        todo.title.trim().length > 0 &&
-        todo.title.length <= maxStoredReportTodoTextLength &&
-        typeof todo.detail === "string" &&
-        todo.detail.length <= maxStoredReportTodoTextLength &&
-        typeof todo.done === "boolean" &&
-        !seenIds.has(todo.id.trim())
-      ) {
-        seenIds.add(todo.id.trim());
-        todos.push({
-          id: todo.id.trim(),
-          title: todo.title.trim(),
-          detail: todo.detail.trim(),
-          done: todo.done,
-        });
-      }
-    });
-  } catch {
-    return [];
-  }
+  if (!roomId) return todos;
+  const parsed = readStoredJson(
+    reportTodoStorageKey(roomId),
+    maxReportTodoStorageLength,
+  );
+  if (!Array.isArray(parsed)) return todos;
+  const seenIds = new Set<string>();
+  parsed.forEach((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const todo = value as {
+      id?: unknown;
+      title?: unknown;
+      detail?: unknown;
+      done?: unknown;
+    };
+    if (
+      typeof todo.id === "string" &&
+      todo.id.trim().length > 0 &&
+      todo.id.length <= maxStoredReportTodoIdLength &&
+      typeof todo.title === "string" &&
+      todo.title.trim().length > 0 &&
+      todo.title.length <= maxStoredReportTodoTextLength &&
+      typeof todo.detail === "string" &&
+      todo.detail.length <= maxStoredReportTodoTextLength &&
+      typeof todo.done === "boolean" &&
+      !seenIds.has(todo.id.trim())
+    ) {
+      seenIds.add(todo.id.trim());
+      todos.push({
+        id: todo.id.trim(),
+        title: todo.title.trim(),
+        detail: todo.detail.trim(),
+        done: todo.done,
+      });
+    }
+  });
   return todos.slice(0, 100);
 }
 
 function writeLocalReportTodoState(roomId: string | null, todos: readonly ReportTodo[]) {
-  if (!roomId || typeof window === "undefined") return false;
+  if (!roomId) return false;
   const normalized = todos
     .filter(
       (todo) =>
@@ -247,16 +232,11 @@ function writeLocalReportTodoState(roomId: string | null, todos: readonly Report
       done: todo.done === true,
     }))
     .slice(0, 100);
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(normalized);
-    if (serialized.length > maxReportTodoStorageLength) return false;
-    const key = reportTodoStorageKey(roomId);
-    window.localStorage.setItem(key, serialized);
-    return window.localStorage.getItem(key) === serialized;
-  } catch {
-    return false;
-  }
+  return writeStoredJson(
+    reportTodoStorageKey(roomId),
+    normalized,
+    maxReportTodoStorageLength,
+  );
 }
 
 function mergeReportTodos(
@@ -403,32 +383,19 @@ const publishedReplayStorageKey = "learning-meeting-published-replay";
 const maxPublishedReplayStorageLength = 512;
 
 function readPublishedReplayTitle() {
-  if (typeof window === "undefined") return null;
-  try {
-    const rawStored = window.localStorage.getItem(publishedReplayStorageKey);
-    if (rawStored && rawStored.length > maxPublishedReplayStorageLength) return null;
-    const stored = rawStored?.trim();
-    if (stored && stored.length > maxPublishedReplayStorageLength) return null;
-    return stored && replayCatalog.some((item) => item.title === stored)
-      ? stored
-      : null;
-  } catch {
-    return null;
-  }
+  const stored = readStoredText(
+    publishedReplayStorageKey,
+    maxPublishedReplayStorageLength,
+  )?.trim();
+  return stored && replayCatalog.some((item) => item.title === stored)
+    ? stored
+    : null;
 }
 
 function writePublishedReplayTitle(title: string | null) {
-  if (typeof window === "undefined") return false;
-  try {
-    if (title) {
-      window.localStorage.setItem(publishedReplayStorageKey, title);
-    } else {
-      window.localStorage.removeItem(publishedReplayStorageKey);
-    }
-    return window.localStorage.getItem(publishedReplayStorageKey) === (title || null);
-  } catch {
-    return false;
-  }
+  return title
+    ? writeStoredText(publishedReplayStorageKey, title)
+    : removeStoredValue(publishedReplayStorageKey);
 }
 
 function createLocalReplayPlaceholder(
@@ -1132,52 +1099,38 @@ function normalizeStoredMaterialFile(file: MaterialFile): MaterialFile {
 }
 
 function readLocalMaterialFiles(): MaterialFile[] {
-  if (typeof window === "undefined") return [];
-  let stored: string | null;
-  try {
-    stored = window.localStorage.getItem(localMaterialFilesStorageKey);
-  } catch {
-    return [];
-  }
-  if (!stored || stored.length > maxLocalMaterialStorageLength) return [];
-  try {
-    const parsed = JSON.parse(stored) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    const seenIds = new Set<string>();
-    return parsed
-      .flatMap((value) => {
-        if (!isValidStoredMaterialFile(value)) return [];
-        const file = normalizeStoredMaterialFile(value);
-        if (
-          file.name.length > maxMaterialFileNameLength ||
-          file.name.length === 0 ||
-          seenIds.has(file.id)
-        )
-          return [];
-        seenIds.add(file.id);
-        return [file];
-      })
-      .slice(0, maxLocalMaterialFileCount);
-  } catch {
-    return [];
-  }
+  const parsed = readStoredJson(
+    localMaterialFilesStorageKey,
+    maxLocalMaterialStorageLength,
+  );
+  if (!Array.isArray(parsed)) return [];
+  const seenIds = new Set<string>();
+  return parsed
+    .flatMap((value) => {
+      if (!isValidStoredMaterialFile(value)) return [];
+      const file = normalizeStoredMaterialFile(value);
+      if (
+        file.name.length > maxMaterialFileNameLength ||
+        file.name.length === 0 ||
+        seenIds.has(file.id)
+      )
+        return [];
+      seenIds.add(file.id);
+      return [file];
+    })
+    .slice(0, maxLocalMaterialFileCount);
 }
 
 function writeLocalMaterialFiles(files: MaterialFile[]) {
-  if (typeof window === "undefined") return false;
   const normalized = files
     .filter(isValidStoredMaterialFile)
     .map(normalizeStoredMaterialFile)
     .slice(0, maxLocalMaterialFileCount);
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(normalized);
-    if (serialized.length > maxLocalMaterialStorageLength) return false;
-    window.localStorage.setItem(localMaterialFilesStorageKey, serialized);
-    return window.localStorage.getItem(localMaterialFilesStorageKey) === serialized;
-  } catch {
-    return false;
-  }
+  return writeStoredJson(
+    localMaterialFilesStorageKey,
+    normalized,
+    maxLocalMaterialStorageLength,
+  );
 }
 
 function hasValidStoredMeetingMetadata(
@@ -1226,29 +1179,23 @@ const defaultScheduledMeeting: ScheduledMeeting = {
 };
 
 function readLocalMeetings(): LocalMeetingRecord[] {
-  if (typeof window === "undefined") return [];
-  let stored: string | null;
-  try {
-    stored = window.localStorage.getItem(localMeetingsStorageKey);
-  } catch {
-    return [];
-  }
-  if (!stored || stored.length > maxLocalMeetingsStorageLength) return [];
-  try {
-    const parsed = JSON.parse(stored) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    const seenRoomIds = new Set<string>();
-    return parsed
-      .flatMap((value) => {
-        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-        const record = value as Partial<LocalMeetingRecord>;
-        if (
-          !hasValidStoredMeetingMetadata(record) ||
-          typeof record.roomId !== "string" ||
-          !isValidStoredRoomId(record.roomId) ||
-          (record.status !== "upcoming" && record.status !== "past")
-        )
-          return [];
+  const parsed = readStoredJson(
+    localMeetingsStorageKey,
+    maxLocalMeetingsStorageLength,
+  );
+  if (!Array.isArray(parsed)) return [];
+  const seenRoomIds = new Set<string>();
+  return parsed
+    .flatMap((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const record = value as Partial<LocalMeetingRecord>;
+      if (
+        !hasValidStoredMeetingMetadata(record) ||
+        typeof record.roomId !== "string" ||
+        !isValidStoredRoomId(record.roomId) ||
+        (record.status !== "upcoming" && record.status !== "past")
+      )
+        return [];
       if (seenRoomIds.has(record.roomId)) return [];
       seenRoomIds.add(record.roomId);
       const normalizedMode =
@@ -1281,59 +1228,51 @@ function readLocalMeetings(): LocalMeetingRecord[] {
               : normalizedGenerateReport,
           status: record.status,
         } satisfies LocalMeetingRecord,
-        ];
-      })
-      .slice(0, maxLocalMeetingRecordCount);
-  } catch {
-    return [];
-  }
+      ];
+    })
+    .slice(0, maxLocalMeetingRecordCount);
 }
 
 function writeLocalMeetings(meetings: LocalMeetingRecord[]) {
-  if (typeof window === "undefined") return false;
-  try {
-    const seenRoomIds = new Set<string>();
-    const mergedMeetings = [...meetings, ...readLocalMeetings()]
-      .filter((meeting) => {
-        if (seenRoomIds.has(meeting.roomId)) return false;
-        seenRoomIds.add(meeting.roomId);
-        return true;
-      })
-      .slice(0, 20);
-    const serialized = JSON.stringify(mergedMeetings);
-    window.localStorage.setItem(localMeetingsStorageKey, serialized);
-    return window.localStorage.getItem(localMeetingsStorageKey) === serialized;
-  } catch {
-    return false;
-  }
+  const seenRoomIds = new Set<string>();
+  const mergedMeetings = [...meetings, ...readLocalMeetings()]
+    .filter((meeting) => {
+      if (seenRoomIds.has(meeting.roomId)) return false;
+      seenRoomIds.add(meeting.roomId);
+      return true;
+    })
+    .slice(0, 20);
+  return writeStoredJson(localMeetingsStorageKey, mergedMeetings);
 }
 
 function removeLocalMeetingRecord(roomId: string): boolean {
   if (typeof window === "undefined" || !isValidStoredRoomId(roomId)) return false;
+  // 这里刻意直读：键不存在视为“已删除”（true），而 getItem 抛错是失败（false）。
+  // 共享层的 readStoredText 两种情况都返回 null，无法区分。
+  let stored: string | null;
   try {
-    const stored = window.localStorage.getItem(localMeetingsStorageKey);
-    if (stored === null) return true;
-    const current = readLocalMeetings();
-    if (!current.some((meeting) => meeting.roomId === roomId)) return true;
-    const next = current.filter((meeting) => meeting.roomId !== roomId);
-    const serialized = JSON.stringify(next.slice(0, maxLocalMeetingRecordCount));
-    if (serialized.length > maxLocalMeetingsStorageLength) return false;
-    window.localStorage.setItem(localMeetingsStorageKey, serialized);
-    return window.localStorage.getItem(localMeetingsStorageKey) === serialized;
+    stored = window.localStorage.getItem(localMeetingsStorageKey);
   } catch {
     return false;
   }
+  if (stored === null) return true;
+  const current = readLocalMeetings();
+  if (!current.some((meeting) => meeting.roomId === roomId)) return true;
+  const next = current.filter((meeting) => meeting.roomId !== roomId);
+  return writeStoredJson(
+    localMeetingsStorageKey,
+    next.slice(0, maxLocalMeetingRecordCount),
+    maxLocalMeetingsStorageLength,
+  );
 }
 
 function readScheduledMeeting(): ScheduledMeeting | null {
-  if (typeof window === "undefined") return null;
-  let stored: string | null;
-  try {
-    stored = window.localStorage.getItem(scheduledMeetingStorageKey);
-  } catch {
-    return null;
-  }
-  if (!stored || stored.length > maxScheduledMeetingStorageLength) return null;
+  const stored = readStoredText(
+    scheduledMeetingStorageKey,
+    maxScheduledMeetingStorageLength,
+  );
+  if (!stored) return null;
+  // 旧格式兼容：早期版本只写字面量 "true"，必须在 JSON.parse 之前拦。
   if (stored === "true") return defaultScheduledMeeting;
   try {
     const parsed = JSON.parse(stored) as Partial<ScheduledMeeting>;
@@ -1389,27 +1328,11 @@ function readScheduledMeeting(): ScheduledMeeting | null {
 }
 
 function writeScheduledMeeting(meeting: ScheduledMeeting): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const serialized = JSON.stringify(meeting);
-    window.localStorage.setItem(
-      scheduledMeetingStorageKey,
-      serialized,
-    );
-    return window.localStorage.getItem(scheduledMeetingStorageKey) === serialized;
-  } catch {
-    return false;
-  }
+  return writeStoredJson(scheduledMeetingStorageKey, meeting);
 }
 
 function removeScheduledMeeting(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    window.localStorage.removeItem(scheduledMeetingStorageKey);
-    return window.localStorage.getItem(scheduledMeetingStorageKey) === null;
-  } catch {
-    return false;
-  }
+  return removeStoredValue(scheduledMeetingStorageKey);
 }
 
 function PersonAvatar({
@@ -2316,8 +2239,8 @@ export default function Home() {
     const scheduledRemoved =
       !scheduledRecordExists || removeScheduledMeeting();
     if (!localRemoved || !scheduledRemoved) {
-      setLocalMeetings(readLocalMeetings());
-      setScheduledMeeting(readScheduledMeeting());
+      // 删除失败时不重读存储：此刻读取本身可能就是失败原因，
+      // 重读会把列表清空，反而丢掉本应保留的记录。
       setToast("无法删除本机会议记录，请检查本机存储后重试");
       return;
     }

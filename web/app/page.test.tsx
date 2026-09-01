@@ -1371,6 +1371,64 @@ describe("会议页面", () => {
     setItemSpy.mockRestore();
   });
 
+  // getItem 抛错必须与“键不存在”区分：抛错是失败（保留记录并提示），
+  // 键不存在才视为已删除。共享存储层两者都返回 null，所以删除路径刻意直读。
+  it("本机会议删除读取抛错时保留记录并提示", async () => {
+    const roomId = "936217530";
+    const title = "读取抛错的本机会议";
+    window.localStorage.setItem(
+      "learning-meetings-created",
+      JSON.stringify([
+        {
+          id: "local-created-read-throw",
+          day: "28",
+          month: "今天",
+          time: "刚刚",
+          title,
+          detail: "本机创建 · 仅当前演示可见",
+          type: "普通会议",
+          accent: "blue",
+          roomId,
+          mode: "normal",
+          status: "upcoming",
+        },
+      ]),
+    );
+    render(<Home />);
+    fireEvent.click(screen.getByRole("button", { name: "我的会议" }));
+    const row = await waitFor(() => {
+      const meetingRow = screen.getByText(title).closest("article");
+      expect(meetingRow).toBeTruthy();
+      return meetingRow as HTMLElement;
+    });
+    fireEvent.click(within(row).getByRole("button", { name: "更多操作" }));
+    fireEvent.click(
+      within(screen.getByRole("menu", { name: `${title}更多操作` })).getByRole(
+        "menuitem",
+        { name: "删除本机记录" },
+      ),
+    );
+    const getItemSpy = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("storage unavailable");
+      });
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "删除这场本机会议？" })).getByRole(
+        "button",
+        { name: "确认删除" },
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(title)).toBeTruthy();
+      expect(screen.getByRole("status").textContent).toContain(
+        "无法删除本机会议记录",
+      );
+    });
+    getItemSpy.mockRestore();
+  });
+
   it("录制清理异常时删除流程仍会结束并提示部分失败", async () => {
     const roomId = "936217523";
     const title = "录制清理异常的本机会议";
