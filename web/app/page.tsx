@@ -5762,10 +5762,21 @@ function ReportPage({
     if (!reportSnapshot || !reportRoomId) return defaultTodos;
     return mergeReportTodos(defaultTodos, readLocalReportTodos(reportRoomId));
   });
+  // 挂载时的首次写入只是把初始待办落盘，不是用户动作，失败也不提示，
+  // 否则每次打开报告页都可能弹一次与当前操作无关的提示。
+  // 记录已落盘过的会议号而非布尔值：切换报告页时首次写入同样属于水合，
+  // 用布尔值会让换会议后的第一次落盘被误判成用户动作。
+  // 该分支当前无测试覆盖也无法覆盖：带 reportSnapshot 的会议只来自本机创建，
+  // 单次会话内 reportRoomId 不会变化。若种子历史会议以后带上快照即可达。
+  const hydratedTodoRoomRef = useRef<string | null>(null);
   useEffect(() => {
     if (!reportSnapshot || !reportRoomId) return;
-    writeLocalReportTodoState(reportRoomId, todos);
-  }, [reportRoomId, reportSnapshot, todos]);
+    const saved = writeLocalReportTodoState(reportRoomId, todos);
+    if (!saved && hydratedTodoRoomRef.current === reportRoomId) {
+      setToast("课后任务已更新，但本机保存失败");
+    }
+    hydratedTodoRoomRef.current = reportRoomId;
+  }, [reportRoomId, reportSnapshot, setToast, todos]);
   useEffect(() => {
     if (!reportSnapshot || !reportRoomId) return;
     const key = reportTodoStorageKey(reportRoomId);

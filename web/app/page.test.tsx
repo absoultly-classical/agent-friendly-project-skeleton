@@ -4137,6 +4137,40 @@ describe("会议页面", () => {
     expect(screen.getByText("整理会议行动项")).toBeTruthy();
   });
 
+  it("报告待办写入失败时保留勾选并提示本机保存失败", async () => {
+    render(<Home />);
+    fireEvent.click(screen.getByRole("button", { name: /快速会议/ }));
+    fireEvent.click(screen.getByRole("button", { name: /开始会议/ }));
+    fireEvent.click(screen.getByRole("button", { name: "结束会议" }));
+
+    const todo = screen.getByRole("checkbox", { name: /导出本地会话摘要/ });
+    expect(todo).toHaveProperty("checked", false);
+
+    const original = Storage.prototype.setItem;
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key: string, value: string) {
+        if (key.startsWith("learning-meeting-report-todos:")) {
+          throw new Error("quota exceeded");
+        }
+        original.call(this, key, value);
+      });
+
+    fireEvent.click(todo);
+
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toContain(
+        "课后任务已更新，但本机保存失败",
+      );
+    });
+    expect(
+      screen.getByRole("checkbox", { name: /导出本地会话摘要/ }),
+    ).toHaveProperty("checked", true);
+    setItemSpy.mockRestore();
+  });
+
+  // 换报告页时的第一次落盘只是水合新会议的待办，不是用户勾选，
+  // 失败也不该弹提示，否则打开历史报告页就会看到无来由的报错。
   it("报告待办会响应同源窗口的 storage 更新", async () => {
     render(<Home />);
     fireEvent.click(screen.getByRole("button", { name: /快速会议/ }));
