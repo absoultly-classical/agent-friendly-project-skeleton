@@ -1,7 +1,18 @@
-const recordingDatabaseName = "learning-meeting-recordings";
+import {
+  isIndexedDbAvailable,
+  openLocalIdbOrNull,
+  requestResult,
+  transactionResult,
+} from "./local-idb";
+
 const recordingStoreName = "recordings";
-const recordingDatabaseVersion = 1;
 const maxRecordingRoomIdLength = 18;
+const recordingIdbConfig = {
+  databaseName: "learning-meeting-recordings",
+  databaseVersion: 1,
+  storeName: recordingStoreName,
+  keyPath: "roomId",
+} as const;
 
 type StoredRecording = {
   roomId: string;
@@ -10,67 +21,16 @@ type StoredRecording = {
   savedAt: number;
 };
 
-function canUseIndexedDb() {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.indexedDB !== "undefined" &&
-    typeof window.indexedDB.open === "function"
-  );
-}
-
 function isValidRoomId(roomId: string) {
   return /^\d{6,18}$/.test(roomId) && roomId.length <= maxRecordingRoomIdLength;
 }
 
-function requestResult<T>(request: IDBRequest<T>) {
-  return new Promise<T>((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () =>
-      reject(request.error ?? new Error("IndexedDB request failed"));
-  });
-}
-
-function transactionResult(transaction: IDBTransaction) {
-  return new Promise<void>((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () =>
-      reject(transaction.error ?? new Error("IndexedDB transaction failed"));
-    transaction.onabort = () =>
-      reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
-  });
-}
-
-function openDatabase() {
-  if (!canUseIndexedDb()) return Promise.resolve<IDBDatabase | null>(null);
-  return new Promise<IDBDatabase | null>((resolve, reject) => {
-    const request = window.indexedDB.open(
-      recordingDatabaseName,
-      recordingDatabaseVersion,
-    );
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(recordingStoreName)) {
-        request.result.createObjectStore(recordingStoreName, {
-          keyPath: "roomId",
-        });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () =>
-      reject(request.error ?? new Error("IndexedDB open failed"));
-    request.onblocked = () => reject(new Error("IndexedDB open blocked"));
-  });
-}
-
-async function getDatabase() {
-  try {
-    return await openDatabase();
-  } catch {
-    return null;
-  }
+function getDatabase() {
+  return openLocalIdbOrNull(recordingIdbConfig);
 }
 
 export async function readLocalRecording(roomId: string) {
-  if (!canUseIndexedDb() || !isValidRoomId(roomId)) return null;
+  if (!isIndexedDbAvailable() || !isValidRoomId(roomId)) return null;
   const database = await getDatabase();
   if (!database) return null;
   try {
@@ -89,7 +49,7 @@ export async function readLocalRecording(roomId: string) {
 }
 
 export async function saveLocalRecording(roomId: string, blob: Blob) {
-  if (!canUseIndexedDb() || !isValidRoomId(roomId)) return false;
+  if (!isIndexedDbAvailable() || !isValidRoomId(roomId)) return false;
   const database = await getDatabase();
   if (!database) return false;
   try {
@@ -110,7 +70,7 @@ export async function saveLocalRecording(roomId: string, blob: Blob) {
 }
 
 export async function removeLocalRecording(roomId: string) {
-  if (!canUseIndexedDb() || !isValidRoomId(roomId)) return false;
+  if (!isIndexedDbAvailable() || !isValidRoomId(roomId)) return false;
   const database = await getDatabase();
   if (!database) return false;
   try {
@@ -126,7 +86,7 @@ export async function removeLocalRecording(roomId: string) {
 }
 
 export async function pruneLocalRecordings(activeRoomIds: readonly string[]) {
-  if (!canUseIndexedDb()) return false;
+  if (!isIndexedDbAvailable()) return false;
   const database = await getDatabase();
   if (!database) return false;
   try {

@@ -1,6 +1,17 @@
-const materialContentDatabaseName = "learning-meeting-material-content";
+import {
+  isIndexedDbAvailable,
+  openLocalIdb,
+  requestResult,
+  transactionResult,
+} from "./local-idb";
+
 const materialContentStoreName = "files";
-const materialContentDatabaseVersion = 1;
+const materialContentIdbConfig = {
+  databaseName: "learning-meeting-material-content",
+  databaseVersion: 1,
+  storeName: materialContentStoreName,
+  keyPath: "id",
+} as const;
 
 type StoredMaterialContent = {
   id: string;
@@ -15,47 +26,8 @@ export type MaterialContentPersistenceResult =
   | "unsupported"
   | "failed";
 
-function isIndexedDbAvailable() {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.indexedDB !== "undefined" &&
-    typeof window.indexedDB.open === "function"
-  );
-}
-
-function requestResult<T>(request: IDBRequest<T>) {
-  return new Promise<T>((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
-  });
-}
-
-function transactionResult(transaction: IDBTransaction) {
-  return new Promise<void>((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
-    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
-  });
-}
-
 function openDatabase() {
-  if (!isIndexedDbAvailable()) return Promise.resolve<IDBDatabase | null>(null);
-  return new Promise<IDBDatabase | null>((resolve, reject) => {
-    const request = window.indexedDB.open(
-      materialContentDatabaseName,
-      materialContentDatabaseVersion,
-    );
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(materialContentStoreName)) {
-        request.result.createObjectStore(materialContentStoreName, {
-          keyPath: "id",
-        });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
-    request.onblocked = () => reject(new Error("IndexedDB open blocked"));
-  });
+  return openLocalIdb(materialContentIdbConfig);
 }
 
 function fileFromStoredContent(content: StoredMaterialContent) {
