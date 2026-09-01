@@ -90,7 +90,6 @@
 - 当前状态：已完成并已提交。外部行为未变，属纯内部重构。
 - 改动范围：新增 `web/app/local-idb.ts`；修改 `web/app/use-local-material-contents.ts`、
   `web/app/use-local-recording-storage.ts`；本任务文档。
-- 风险与未决问题：`local-idb.ts` 本身尚无直接单元测试，目前靠两个调用方的测试间接
-  覆盖。若后续有第三个模块接入，建议为共享层补独立测试。
+- 风险与未决问题：已由 TASK-0223 闭合（当时缺的共享层直接单测已补齐）。
 - 下一步：无必须后续项。新增本地存储模块时应直接复用 `local-idb.ts`，不要再复制
   事件桥接代码。
